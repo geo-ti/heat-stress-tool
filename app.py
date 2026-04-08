@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime
 from geopy.geocoders import Nominatim
 from geopy.extra.rate_limiter import RateLimiter
+import altair as alt 
 
 # Standard Indian Cities Dictionary (Fallback/Instant)
 CITY_FALLBACK = {
