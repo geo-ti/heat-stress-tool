@@ -132,6 +132,9 @@ try:
         # size=40 makes the dots visible, color='color' looks at our hex codes
         st.map(live_df, size=60, color='color')
 
+        # 3. LEGEND (Handy for your audience)
+        st.write("**Map Legend:** 🟢 <20° | 🟡 26-32° | 🟠 32-38° | 🔴 38-46° | 🟤 >46°")
+
         # 2. THE CUSTOM BAR CHART (Yellow/Red)
         st.subheader("Air Temp (Yellow) vs. Body Stress (Red)")
         
@@ -155,9 +158,6 @@ try:
         ).properties(width=alt.Step(40), height=400)
 
         st.altair_chart(combined_chart, use_container_width=True)
-        
-        # 3. LEGEND (Handy for your audience)
-        st.write("**Map Legend:** 🟢 <20° | 🟡 26-32° | 🟠 32-38° | 🔴 38-46° | 🟤 >46°")
 
 except Exception as e:
     st.info("Awaiting first entry...")
