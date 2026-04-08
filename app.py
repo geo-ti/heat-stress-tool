@@ -3,11 +3,29 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 
-# --- 1. SETTINGS & CALCULATIONS ---
+# --- 1. SETTINGS & GEODATA ---
 st.set_page_config(page_title="Heat Perception Tool", page_icon="🌡️", layout="wide")
 
+# Simple geocoding helper for a live session
+def get_coords(city):
+    city = city.strip().title()
+    # Dictionary of major Indian cities for instant geocoding
+    geo_dict = {
+        "Mumbai": [19.0760, 72.8777],
+        "Delhi": [28.6139, 77.2090],
+        "Bangalore": [12.9716, 77.5946],
+        "Chennai": [13.0827, 80.2707],
+        "Kolkata": [22.5726, 88.3639],
+        "Hyderabad": [17.3850, 78.4867],
+        "Pune": [18.5204, 73.8567],
+        "Ahmedabad": [23.0225, 72.5714],
+        "Lucknow": [26.8467, 80.9462],
+        "Jaipur": [26.9124, 75.7873]
+    }
+    # Return coords if in dict, else default to a central India point or skip
+    return geo_dict.get(city, [20.5937, 78.9629]) 
+
 def calculate_heat_index(T, rh):
-    """Formula for Heat Index (Apparent Temperature)"""
     return -8.7846947556 + 1.61139411 * T + 2.33854883889 * rh + \
            -0.14611605 * T * rh + -0.012308094 * (T**2) + \
            -0.0164248277778 * (rh**2) + 0.002211732 * (T**2) * rh + \
@@ -16,109 +34,61 @@ def calculate_heat_index(T, rh):
 # --- 2. DATABASE CONNECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- 3. HEADER & INTRO ---
-st.title("🌡️ Heat Perception: Live Session")
-st.write("How does your city feel today? Help us map the 'Perception Gap' by entering your local conditions.")
+# --- 3. DATA ENTRY FORM ---
+st.title("🌡️ Heat Perception Live Map")
 
-# --- 4. DATA ENTRY FORM ---
 with st.form("input_form", clear_on_submit=True):
-    st.subheader("Step 1: Your Current Conditions")
-    col_input1, col_input2 = st.columns(2)
-    
-    with col_input1:
-        city_name = st.text_input("City/Location Name", placeholder="e.g. Mumbai")
-        air_temp = st.number_input("Air Temperature (°C)", min_value=15, max_value=55, value=30)
-    
-    with col_input2:
+    st.subheader("Add Your Local Conditions")
+    col1, col2 = st.columns(2)
+    with col1:
+        city_name = st.text_input("City Name (e.g., Mumbai, Delhi)")
+        air_temp = st.number_input("Air Temp (°C)", value=30)
+    with col2:
         humidity = st.slider("Humidity (%)", 0, 100, 50)
-        surface = st.selectbox("What are you standing on?", ["Asphalt/Road", "Grass/Park", "Cool Roof", "Indoor/Office"])
+        surface = st.selectbox("Surface Type", ["Asphalt", "Grass", "Cool Roof", "Indoor"])
 
-    submit_button = st.form_submit_button("Submit to Live Dashboard")
-
-    if submit_button:
-        if not city_name:
-            st.error("Please enter a city name.")
-        else:
-            # Calculation Logic
-            feels_like_base = calculate_heat_index(air_temp, humidity)
-            surface_factor = 5 if surface == "Asphalt/Road" else -2 if surface == "Grass/Park" else 0
-            final_score = round(feels_like_base + surface_factor, 1)
-
-            # Create new entry
+    if st.form_submit_button("Submit"):
+        if city_name:
+            coords = get_coords(city_name)
+            feels = round(calculate_heat_index(air_temp, humidity), 1)
+            
             new_entry = pd.DataFrame([{
                 "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "City": city_name,
                 "Air_Temp": air_temp,
-                "Humidity": humidity,
-                "Surface": surface,
-                "Feels_Like": final_score
+                "Feels_Like": feels,
+                "lat": coords[0],
+                "lon": coords[1]
             }])
 
             try:
-                # READ existing data (ttl=0 ensures we don't use a cached old version)
-                existing_data = conn.read(ttl=0)
-                
-                # APPEND logic
-                if existing_data is not None and not existing_data.empty:
-                    # Filter out empty or all-NA columns before concatenating
-                    existing_data = existing_data.dropna(axis=1, how='all')
-                    updated_df = pd.concat([existing_data, new_entry], ignore_index=True)
-                else:
-                    updated_df = new_entry
-
-                # WRITE back to Google Sheets
+                df = conn.read(ttl=0)
+                updated_df = pd.concat([df, new_entry], ignore_index=True) if df is not None else new_entry
                 conn.update(data=updated_df)
-                
-                st.success(f"Successfully added {city_name}!")
-                st.balloons()
-                
-                # Clear the internal app cache so the dashboard updates immediately
+                st.success(f"Added {city_name}!")
                 st.cache_data.clear()
-                
             except Exception as e:
-                st.error(f"Error connecting to Google Sheets: {e}")
+                st.error(f"Error: {e}")
 
-# --- 5. LIVE VISUALIZATION ---
+# --- 4. VISUALIZATION DASHBOARD ---
 st.divider()
-st.header("📍 Live Session Dashboard")
-
 try:
-    # Always read with ttl=0 to keep the session dashboard live
     live_df = conn.read(ttl=0)
-    
     if live_df is not None and not live_df.empty:
-        # Metric Section
-        avg_air = live_df['Air_Temp'].mean()
-        avg_feels = live_df['Feels_Like'].mean()
-        gap = avg_feels - avg_air
         
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Avg Room Air Temp", f"{round(avg_air, 1)}°C")
-        m2.metric("Avg 'Feels Like' Temp", f"{round(avg_feels, 1)}°C")
-        m3.metric("The Perception Gap", f"{round(gap, 1)}°C", delta_color="inverse")
+        # --- ROW 1: THE MAP ---
+        st.subheader("📍 Live Heat Map (Session Participants)")
+        # st.map automatically looks for columns named 'lat' and 'lon'
+        st.map(live_df, size=20, color='#ff4b4b') 
 
-        # Visualization Section
-        col_chart, col_table = st.columns([2, 1])
+        # --- ROW 2: THE CHARTS ---
+        col_left, col_right = st.columns(2)
+        with col_left:
+            st.subheader("City Comparison")
+            st.bar_chart(live_df.tail(10), x="City", y=["Air_Temp", "Feels_Like"])
         
-        with col_chart:
-            st.subheader("Comparison by City (Last 15 entries)")
-            # Using the last 15 for better readability on screen
-            chart_subset = live_df.tail(15)
-            st.bar_chart(data=chart_subset, x="City", y=["Air_Temp", "Feels_Like"])
-        
-        with col_table:
-            st.subheader("Recent Activity")
-            # Show the most recent entries at the top
-            st.dataframe(
-                live_df[['Timestamp', 'City', 'Feels_Like']].sort_values(by="Timestamp", ascending=False), 
-                use_container_width=True,
-                hide_index=True
-            )
-    else:
-        st.info("The dashboard is currently empty. Be the first to add data!")
-        
-except Exception as e:
-    st.warning("Dashboard will be available once the first data point is submitted.")
-
-st.divider()
-st.caption("Data is collected live for educational purposes. Visualizations are based on real-time participant inputs.")
+        with col_right:
+            st.subheader("Recent Submissions")
+            st.dataframe(live_df[['City', 'Air_Temp', 'Feels_Like']].tail(5))
+except:
+    st.info("Awaiting first submission...")
