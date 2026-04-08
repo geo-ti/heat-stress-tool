@@ -70,10 +70,12 @@ with st.form("input_form", clear_on_submit=True):
             else:
                 st.error("Could not find that location. Try a nearby major city name.")
 
-# --- 4. VISUALIZATION ---
+# --- 4. VISUALIZATION DASHBOARD ---
 st.divider()
 try:
+    # Read the latest data
     live_df = conn.read(ttl=0)
+    
     if live_df is not None and not live_df.empty:
         
         # 1. THE MAP
@@ -81,36 +83,48 @@ try:
         st.map(live_df, size=40, color='#E63946')
 
         # 2. THE CUSTOM BAR CHART
-        c1, c2 = st.columns([2, 1])
+        st.subheader("Air Temp (Yellow) vs. Body Stress (Red)")
         
-        with c1:
-            st.subheader("Air Temp vs. Body Stress")
-            
-            # We need to "melt" the dataframe to make it Altair-friendly
-            # This turns columns [Air_Temp, Feels_Like] into a 'Category' column
-            chart_data = live_df.tail(10).melt(
-                id_vars=["City"], 
-                value_vars=["Air_Temp", "Feels_Like"],
-                var_name="Measurement", 
-                value_name="Temperature"
-            )
+        # --- DATA PREP ---
+        # Get the last 10 entries and only the columns we need
+        plot_df = live_df.tail(10)[['City', 'Air_Temp', 'Feels_Like']].copy()
+        
+        # Melt the data: This turns it from "Wide" to "Long" format for Altair
+        chart_data = plot_df.melt(
+            id_vars=["City"], 
+            value_vars=["Air_Temp", "Feels_Like"],
+            var_name="Type", 
+            value_name="Temp"
+        )
 
-            # Creating the Altair Chart
-            bar_chart = alt.Chart(chart_data).mark_bar().encode(
-                x=alt.X("Measurement:N", title=None, axis=alt.Axis(labels=False)), # Hides internal labels
-                y=alt.Y("Temperature:Q", title="Temperature (°C)"),
-                color=alt.Color("Measurement:N", 
-                                scale=alt.Scale(domain=["Air_Temp", "Feels_Like"], 
-                                               range=["#FFD700", "#E63946"]), # Yellow and Red
-                                legend=alt.Legend(title="Type")),
-                column=alt.Column("City:N", title="Location", spacing=10) # Groups bars by City
-            ).properties(width=80, height=300)
+        # --- ALTAIR CHART ---
+        # We use xOffset to put the bars side-by-side
+        combined_chart = alt.Chart(chart_data).mark_bar().encode(
+            x=alt.X('City:N', title="Location"),
+            y=alt.Y('Temp:Q', title="Temperature (°C)", scale=alt.Scale(domainMin=0)),
+            xOffset='Type:N',  # This creates the side-by-side (grouped) effect
+            color=alt.Color('Type:N', 
+                            scale=alt.Scale(domain=['Air_Temp', 'Feels_Like'], 
+                                           range=['#FFD700', '#E63946']),
+                            legend=alt.Legend(title="Measurement")),
+            tooltip=['City', 'Type', 'Temp']
+        ).properties(
+            width=alt.Step(40),  # Adjusts bar width
+            height=400
+        ).configure_view(
+            stroke=None
+        )
 
-            st.altair_chart(bar_chart)
+        st.altair_chart(combined_chart, use_container_width=True)
 
-        with c2:
-            st.subheader("Live Submissions")
-            st.dataframe(live_df[['City', 'Feels_Like', 'Surface']].tail(8), hide_index=True)
+        # 3. RAW DATA TABLE
+        st.subheader("Recent Submissions")
+        st.dataframe(live_df[['Timestamp', 'City', 'Surface', 'Feels_Like']].tail(10), hide_index=True, use_container_width=True)
 
+    else:
+        st.info("The dashboard is currently empty. Be the first to add data!")
+        
 except Exception as e:
-    st.info(f"Awaiting the first submission... (System Check: {e})")
+    # This will help us debug if it still fails
+    st.error(f"Visualization Error: {e}")
+    st.write("Current Data Preview:", live_df.tail(5) if 'live_df' in locals() else "No data found")
