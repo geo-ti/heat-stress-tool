@@ -75,18 +75,42 @@ st.divider()
 try:
     live_df = conn.read(ttl=0)
     if live_df is not None and not live_df.empty:
-        # Create a combined display for the map
-        st.subheader("🌍 Interactive Heat Stress Map")
         
-        # We can color the points by "Feels Like" (Red for hot, Orange for warm)
+        # 1. THE MAP
+        st.subheader("🌍 Interactive Heat Stress Map")
         st.map(live_df, size=40, color='#E63946')
 
-        c1, c2 = st.columns(2)
+        # 2. THE CUSTOM BAR CHART
+        c1, c2 = st.columns([2, 1])
+        
         with c1:
             st.subheader("Air Temp vs. Body Stress")
-            st.bar_chart(live_df.tail(10), x="City", y=["Air_Temp", "Feels_Like"])
+            
+            # We need to "melt" the dataframe to make it Altair-friendly
+            # This turns columns [Air_Temp, Feels_Like] into a 'Category' column
+            chart_data = live_df.tail(10).melt(
+                id_vars=["City"], 
+                value_vars=["Air_Temp", "Feels_Like"],
+                var_name="Measurement", 
+                value_name="Temperature"
+            )
+
+            # Creating the Altair Chart
+            bar_chart = alt.Chart(chart_data).mark_bar().encode(
+                x=alt.X("Measurement:N", title=None, axis=alt.Axis(labels=False)), # Hides internal labels
+                y=alt.Y("Temperature:Q", title="Temperature (°C)"),
+                color=alt.Color("Measurement:N", 
+                                scale=alt.Scale(domain=["Air_Temp", "Feels_Like"], 
+                                               range=["#FFD700", "#E63946"]), # Yellow and Red
+                                legend=alt.Legend(title="Type")),
+                column=alt.Column("City:N", title="Location", spacing=10) # Groups bars by City
+            ).properties(width=80, height=300)
+
+            st.altair_chart(bar_chart)
+
         with c2:
             st.subheader("Live Submissions")
             st.dataframe(live_df[['City', 'Feels_Like', 'Surface']].tail(8), hide_index=True)
-except:
-    st.info("Awaiting the first submission...")
+
+except Exception as e:
+    st.info(f"Awaiting the first submission... (System Check: {e})")
