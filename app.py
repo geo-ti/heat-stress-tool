@@ -38,6 +38,20 @@ def get_location_smart(city_name):
     # Absolute Fallback (Central India) so the app never fails
     return 20.5937, 78.9629
 
+def get_thermal_color(temp):
+    if temp < 20:
+        return "#008000"  # Green
+    elif 20 <= temp < 26:
+        return "#ADFF2F"  # Greenish Yellow (GreenYellow)
+    elif 26 <= temp < 32:
+        return "#FFFF00"  # Yellow
+    elif 32 <= temp < 38:
+        return "#FFA500"  # Orange
+    elif 38 <= temp < 46:
+        return "#8B0000"  # Deep Red (DarkRed)
+    else:
+        return "#4B0000"  # Dark Brownish Red
+        
 # --- 1. SETTINGS & CALCULATIONS ---
 st.set_page_config(page_title="Heat Perception Map", page_icon="🌡️", layout="wide")
 
@@ -102,26 +116,26 @@ with st.form("input_form", clear_on_submit=True):
                 except Exception as e:
                     st.error(f"Save Error: {e}")
 
-# --- 4. VISUALIZATION DASHBOARD ---
+# --- 4. VISUALIZATION ---
 st.divider()
 try:
-    # Read the latest data
     live_df = conn.read(ttl=0)
-    
     if live_df is not None and not live_df.empty:
         
+        # Apply the color logic to a new column
+        live_df['color'] = live_df['Feels_Like'].apply(get_thermal_color)
+        
         # 1. THE MAP
-        st.subheader("🌍 Interactive Heat Stress Map")
-        st.map(live_df, size=40, color='#E63946')
+        st.subheader("🌍 Real-Time Thermal Stress Distribution")
+        
+        # Show the map using our custom color column
+        # size=40 makes the dots visible, color='color' looks at our hex codes
+        st.map(live_df, size=60, color='color')
 
-        # 2. THE CUSTOM BAR CHART
+        # 2. THE CUSTOM BAR CHART (Yellow/Red)
         st.subheader("Air Temp (Yellow) vs. Body Stress (Red)")
         
-        # --- DATA PREP ---
-        # Get the last 10 entries and only the columns we need
         plot_df = live_df.tail(10)[['City', 'Air_Temp', 'Feels_Like']].copy()
-        
-        # Melt the data: This turns it from "Wide" to "Long" format for Altair
         chart_data = plot_df.melt(
             id_vars=["City"], 
             value_vars=["Air_Temp", "Feels_Like"],
@@ -129,34 +143,21 @@ try:
             value_name="Temp"
         )
 
-        # --- ALTAIR CHART ---
-        # We use xOffset to put the bars side-by-side
         combined_chart = alt.Chart(chart_data).mark_bar().encode(
             x=alt.X('City:N', title="Location"),
-            y=alt.Y('Temp:Q', title="Temperature (°C)", scale=alt.Scale(domainMin=0)),
-            xOffset='Type:N',  # This creates the side-by-side (grouped) effect
+            y=alt.Y('Temp:Q', title="Temperature (°C)"),
+            xOffset='Type:N',
             color=alt.Color('Type:N', 
                             scale=alt.Scale(domain=['Air_Temp', 'Feels_Like'], 
                                            range=['#FFD700', '#E63946']),
                             legend=alt.Legend(title="Measurement")),
             tooltip=['City', 'Type', 'Temp']
-        ).properties(
-            width=alt.Step(40),  # Adjusts bar width
-            height=400
-        ).configure_view(
-            stroke=None
-        )
+        ).properties(width=alt.Step(40), height=400)
 
         st.altair_chart(combined_chart, use_container_width=True)
-
-        # 3. RAW DATA TABLE
-        st.subheader("Recent Submissions")
-        st.dataframe(live_df[['Timestamp', 'City', 'Surface', 'Feels_Like']].tail(10), hide_index=True, use_container_width=True)
-
-    else:
-        st.info("The dashboard is currently empty. Be the first to add data!")
         
+        # 3. LEGEND (Handy for your audience)
+        st.write("**Map Legend:** 🟢 <20° | 🟡 26-32° | 🟠 32-38° | 🔴 38-46° | 🟤 >46°")
+
 except Exception as e:
-    # This will help us debug if it still fails
-    st.error(f"Visualization Error: {e}")
-    st.write("Current Data Preview:", live_df.tail(5) if 'live_df' in locals() else "No data found")
+    st.info("Awaiting first entry...")
